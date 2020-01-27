@@ -13,7 +13,6 @@ spec:
       release: {{.Release.Name }}
   template:
     metadata:
-    {{- if .Values.podAnnotations }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     {{- if .Values.podAnnotations }}
