@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  labels: {{ include "newrelic-logging.labels" . | indent 4 }}
-  name: {{ template "newrelic-logging.fluentBitConfig" . }}
+  labels: {{ include "newrelic.labels" . | indent 4 }}
+  name: {{ template "newrelic.fluentBitConfig" . }}
 data:
   # Configuration files: server, input, filters and output
   # ======================================================
@@ -37,7 +37,52 @@ data:
         Match          kube.*
         Kube_URL       https://kubernetes.default.svc.cluster.local:443
         Merge_JSON_Log Off
-
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under kubernetes
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under labels
+        Prefix_with  labels.
+    [FILTER]
+        Name    grep
+        Match   *
+        Exclude labels.app nginx-ingress
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy        labels.app app
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     cluster lh-dev
+    [FILTER]
+        Name          nest
+        Match         *
+        Operation     lift
+        Nested_under  annotations
+        Prefix_with   annotations.
+    [FILTER]
+        Name        record_modifier
+        Match       *
+        Remove_key  annotations.buildID
+        Remove_key  annotations.BuildID
+        Remove_key  annotations.cattle.io/timestamp
+        Remove_key  annotations.Checksum/config
+        Remove_key  annotations.field.cattle.io/ports
+        Remove_key  annotations.kubernetes.io/psp
+        Remove_key  annotations.seccomp.security.alpha.kubernetes.io/pod
+        Remove_key  annotations.vpaUpdates
+        Remove_key  labels.draft
+        Remove_key  labels.controller-revision-hash
+        Remove_key  labels.controller-uid
+        Remove_key  labels.heritage
+        Remove_key  labels.pod-template-hash
+        Remove_key  labels.secretsVersion
   output-newrelic.conf: |
     [OUTPUT]
         Name  newrelic
