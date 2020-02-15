@@ -55,10 +55,6 @@ data:
         Match   *
         Exclude labels.app nginx-ingress
     [FILTER]
-        Name    grep
-        Match   *
-        Exclude labels.app livefire
-    [FILTER]
         Name        modify
         Match       *
         Copy        labels.app app
