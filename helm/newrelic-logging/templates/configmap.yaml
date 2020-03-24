@@ -32,13 +32,34 @@ data:
         Refresh_Interval  10
 
   filter-kubernetes.conf: |
+    # Exclude kube2iam successes
+    [FILTER]
+        Name    grep
+        Match   *
+        Exclude log ^.*(latest\/meta-data\/iam\/security-credentials).*(res\.status=200).*$
     [FILTER]
         Name                kubernetes
         Match               kube.*
         Kube_URL            https://kubernetes.default.svc.cluster.local:443
         Merge_JSON_Log      Off
+        Merge_Log           Off
         K8S-Logging.Exclude On
         K8S-Logging.Parser  On
+
+    # NGINX filtering
+    [FILTER]
+        Name   parser
+        Match  *
+        Key_Name log
+        Parser nginx
+        Preserve_Key On
+        Reserve_Data On
+    [FILTER]
+        Name grep
+        Match *
+        Exclude code 200
+
+    # Lift the annotations and labels up
     [FILTER]
         Name         nest
         Match        *
@@ -50,10 +71,6 @@ data:
         Operation    lift
         Nested_under labels
         Prefix_with  labels.
-    [FILTER]
-        Name    grep
-        Match   *
-        Exclude labels.app nginx-ingress
     [FILTER]
         Name        modify
         Match       *
@@ -110,3 +127,10 @@ data:
         # Command      |  Decoder | Field | Optional Action
         # =============|==================|=================
         Decode_Field_As   escaped    log
+
+    [PARSER]
+        Name   nginx
+        Format regex
+        Regex ^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*)(?: "(?<referer>[^\"]*)" "(?<agent>[^\"]*)")
+        Time_Key time
+        Time_Format %d/%b/%Y:%H:%M:%S %z
