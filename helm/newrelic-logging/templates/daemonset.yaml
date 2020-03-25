@@ -6,7 +6,9 @@ metadata:
   name: {{ template "newrelic-logging.fullname" . }}
 spec:
   updateStrategy:
-    type: {{ .Values.updateStrategy }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%
   selector:
     matchLabels:
       app: {{ template "newrelic-logging.name" . }}

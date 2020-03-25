@@ -62,9 +62,3 @@ tolerations:
     effect: "NoSchedule"
   - operator: "Exists"
     effect: "NoExecute"
-
-updateStrategy:
-  type: RollingUpdate
-  rollingUpdate:
-    maxUnavailable: 100%
-
