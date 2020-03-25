@@ -37,28 +37,24 @@ data:
         Name    grep
         Match   *
         Exclude log ^.*(latest\/meta-data\/iam\/security-credentials).*(res\.status=200).*$
-    [FILTER]
-        Name                kubernetes
-        Match               kube.*
-        Kube_URL            https://kubernetes.default.svc.cluster.local:443
-        Merge_JSON_Log      Off
-        Merge_Log           Off
-        K8S-Logging.Exclude On
-        K8S-Logging.Parser  On
 
-    # NGINX filtering
+    # NGINX parsing
     [FILTER]
         Name   parser
         Match  *
         Key_Name log
         Parser nginx
         Preserve_Key On
-        Reserve_Data On
+    
+    # Decorate logs
     [FILTER]
-        Name grep
-        Match *
-        Exclude code 200
-
+        Name                kubernetes
+        Match               kube.*
+        Kube_URL            https://kubernetes.default.svc.cluster.local:443
+        Merge_Log           On
+        K8S-Logging.Exclude On
+        K8S-Logging.Parser  On
+    
     # Lift the annotations and labels up
     [FILTER]
         Name         nest
@@ -75,10 +71,69 @@ data:
         Name        modify
         Match       *
         Copy        labels.app app
+
+    # Filter out NGINX Successes
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     isnginxsuccess true
+        Condition Key_Value_Matches app nginx-ingress
+        Condition Key_Value_Matches nginxcode 20*
+    [FILTER]
+        Name    grep
+        Match   *
+        Exclude isnginxsuccess true
+    # Format NGINX outputs
+    [FILTER]
+        Name    modify
+        Match   *
+        Rename nginxremote  nginx.remote
+        Rename nginxhost    nginx.host
+        Rename nginxuser    nginx.user
+        Rename nginxts      nginx.ts
+        Rename nginxmethod  nginx.method
+        Rename nginxpath    nginx.path
+        Rename nginxcode    nginx.code
+        Rename nginxsize    nginx.size
+        Rename nginxreferer nginx.referer
+        Rename nginxagent   nginx.agent
+        Condition Key_exists nginxcode
+
+    # Cluster property
     [FILTER]
         Name    modify
         Match   *
         Set     cluster lh-dev
+    
+    # Lumberjack
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under metadata
+        Prefix_with  metadata.
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     sourcetype lumberjack
+        Condition Key_Value_Matches app dev-lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy metadata.environment environment
+        Condition Key_Value_Matches sourcetype lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy metadata.xsrc xsrc
+        Condition Key_Value_Matches sourcetype lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Hard_copy   metadata.xsrc app
+        Condition Key_Value_Matches app dev-lumberjack
+
+    # Clean up
     [FILTER]
         Name          nest
         Match         *
@@ -131,6 +186,4 @@ data:
     [PARSER]
         Name   nginx
         Format regex
-        Regex ^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*)(?: "(?<referer>[^\"]*)" "(?<agent>[^\"]*)")
-        Time_Key time
-        Time_Format %d/%b/%Y:%H:%M:%S %z
+        Regex ^(?<nginxremote>[^ ]*) (?<nginxhost>[^ ]*) (?<nginxuser>[^ ]*) \[(?<nginxts>[^\]]*)\] "(?<nginxmethod>\S+)(?: +(?<nginxpath>[^\"]*?)(?: +\S*)?)?" (?<nginxcode>[^ ]*) (?<nginxsize>[^ ]*)(?: "(?<nginxreferer>[^\"]*)" "(?<nginxagent>[^\"]*)")
