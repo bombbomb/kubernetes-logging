@@ -63,5 +63,8 @@ tolerations:
   - operator: "Exists"
     effect: "NoExecute"
 
-updateStrategy: RollingUpdate
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 100%
 
