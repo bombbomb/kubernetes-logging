@@ -52,6 +52,7 @@ data:
         Match               kube.*
         Kube_URL            https://kubernetes.default.svc.cluster.local:443
         Merge_Log           On
+        Merge_Log_Key       mergelog
         K8S-Logging.Exclude On
         K8S-Logging.Parser  On
     
@@ -71,6 +72,12 @@ data:
         Name        modify
         Match       *
         Copy        labels.app app
+    [FILTER]
+        Name          nest
+        Match         *
+        Operation     lift
+        Nested_under  annotations
+        Prefix_with   annotations.
 
     # Filter out NGINX Successes
     [FILTER]
@@ -110,8 +117,14 @@ data:
         Name         nest
         Match        *
         Operation    lift
-        Nested_under metadata
-        Prefix_with  metadata.
+        Nested_under mergelog
+        Prefix_with  mergelog.
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under mergelog.metadata
+        Prefix_with  mergelog.metadata.
     [FILTER]
         Name    modify
         Match   *
@@ -120,26 +133,24 @@ data:
     [FILTER]
         Name        modify
         Match       *
-        Copy metadata.environment environment
+        Copy mergelog.metadata.environment environment
         Condition Key_Value_Matches sourcetype lumberjack
     [FILTER]
         Name        modify
         Match       *
-        Copy metadata.xsrc xsrc
+        Copy mergelog.metadata.xsrc xsrc
         Condition Key_Value_Matches sourcetype lumberjack
     [FILTER]
         Name        modify
         Match       *
-        Hard_copy   metadata.xsrc app
+        Hard_copy   mergelog.metadata.xsrc app
         Condition Key_Value_Matches app dev-lumberjack
 
     # Clean up
     [FILTER]
-        Name          nest
-        Match         *
-        Operation     lift
-        Nested_under  annotations
-        Prefix_with   annotations.
+        Name            modify
+        Match           *
+        Remove_regex    mergelog.*
     [FILTER]
         Name        record_modifier
         Match       *
