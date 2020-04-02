@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels: {{ include "newrelic-logging.labels" . | indent 4 }}
+  name: {{ template "newrelic-logging.fluentBitConfig" . }}
+data:
+  # Configuration files: server, input, filters and output
+  # ======================================================
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         1
+        Log_Level     ${LOG_LEVEL}
+        Daemon        off
+        Parsers_File  parsers.conf
+        HTTP_Server   On
+        HTTP_Listen   0.0.0.0
+        HTTP_Port     2020
+
+    @INCLUDE input-kubernetes.conf
+    @INCLUDE output-newrelic.conf
+    @INCLUDE filter-kubernetes.conf
+
+  input-kubernetes.conf: |
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              ${PATH}
+        Parser            docker
+        DB                /var/log/flb_kube.db
+        Mem_Buf_Limit     7MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+
+  filter-kubernetes.conf: |
+    # Exclude kube2iam successes
+    [FILTER]
+        Name    grep
+        Match   *
+        Exclude log ^.*(latest\/meta-data\/iam\/security-credentials).*(res\.status=200).*$
+
+    # NGINX parsing
+    [FILTER]
+        Name   parser
+        Match  *
+        Key_Name log
+        Parser nginx
+        Preserve_Key On
+
+    # Decorate logs
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_URL            https://kubernetes.default.svc.cluster.local:443
+        Merge_Log           On
+        Merge_Log_Key       mergelog
+        K8S-Logging.Exclude On
+        K8S-Logging.Parser  On
+    
+    # Lift the annotations and labels up
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under kubernetes
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under labels
+        Prefix_with  labels.
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy        labels.app app
+    [FILTER]
+        Name          nest
+        Match         *
+        Operation     lift
+        Nested_under  annotations
+        Prefix_with   annotations.
+
+    # Filter out NGINX Successes
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     isnginxsuccess true
+        Condition Key_Value_Matches app nginx-ingress
+        Condition Key_Value_Matches nginxcode 20*
+    [FILTER]
+        Name    grep
+        Match   *
+        Exclude isnginxsuccess true
+    # Format NGINX outputs
+    [FILTER]
+        Name    modify
+        Match   *
+        Rename nginxremote  nginx.remote
+        Rename nginxhost    nginx.host
+        Rename nginxuser    nginx.user
+        Rename nginxts      nginx.ts
+        Rename nginxmethod  nginx.method
+        Rename nginxpath    nginx.path
+        Rename nginxcode    nginx.code
+        Rename nginxsize    nginx.size
+        Rename nginxreferer nginx.referer
+        Rename nginxagent   nginx.agent
+        Condition Key_exists nginxcode
+
+    # Cluster property
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     cluster lh-prod
+
+    # Lumberjack
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under mergelog
+        Prefix_with  mergelog.
+    [FILTER]
+        Name         nest
+        Match        *
+        Operation    lift
+        Nested_under mergelog.metadata
+        Prefix_with  mergelog.metadata.
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     sourcetype lumberjack
+        Condition Key_Value_Matches app lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy mergelog.metadata.environment environment
+        Condition Key_Value_Matches sourcetype lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy mergelog.metadata.xsrc xsrc
+        Condition Key_Value_Matches sourcetype lumberjack
+    [FILTER]
+        Name        modify
+        Match       *
+        Hard_copy   mergelog.metadata.xsrc app
+        Condition Key_Value_Matches app lumberjack
+
+    # Clean up
+    [FILTER]
+        Name            modify
+        Match           *
+        Remove_regex    mergelog.*
+    [FILTER]
+        Name        record_modifier
+        Match       *
+        Remove_key  annotations.buildID
+        Remove_key  annotations.BuildID
+        Remove_key  annotations.cattle.io/timestamp
+        Remove_key  annotations.Checksum/config
+        Remove_key  annotations.field.cattle.io/ports
+        Remove_key  annotations.kubernetes.io/psp
+        Remove_key  annotations.seccomp.security.alpha.kubernetes.io/pod
+        Remove_key  annotations.vpaUpdates
+        Remove_key  labels.draft
+        Remove_key  labels.controller-revision-hash
+        Remove_key  labels.controller-uid
+        Remove_key  labels.heritage
+        Remove_key  labels.pod-template-hash
+        Remove_key  labels.secretsVersion
+
+  output-newrelic.conf: |
+    [OUTPUT]
+        Name  newrelic
+        Match *
+        licenseKey ${LICENSE_KEY}
+        endpoint ${ENDPOINT}
+        maxBufferSize ${BUFFER_SIZE}
+        maxRecords ${MAX_RECORDS}
+
+  parsers.conf: |
+    [PARSER]
+        Name   json
+        Format json
+        Time_Key time
+        Time_Format %d/%b/%Y:%H:%M:%S %z
+
+    [PARSER]
+        Name        docker
+        Format      json
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L
+        Time_Keep   On
+        # Command      |  Decoder | Field | Optional Action
+        # =============|==================|=================
+        Decode_Field_As   escaped    log
+
+    [PARSER]
+        Name   nginx
+        Format regex
+        Regex ^(?<nginxremote>[^ ]*) (?<nginxhost>[^ ]*) (?<nginxuser>[^ ]*) \[(?<nginxts>[^\]]*)\] "(?<nginxmethod>\S+)(?: +(?<nginxpath>[^\"]*?)(?: +\S*)?)?" (?<nginxcode>[^ ]*) (?<nginxsize>[^ ]*)(?: "(?<nginxreferer>[^\"]*)" "(?<nginxagent>[^\"]*)")

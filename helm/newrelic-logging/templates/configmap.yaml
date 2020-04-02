@@ -23,7 +23,8 @@ data:
   input-kubernetes.conf: |
     [INPUT]
         Name              tail
-        Tag               kube.*
+        Tag               kube.<namespace_name>.<container_name>.<pod_name>.<docker_id>-
+        Tag_Regex         (?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-(?<docker_id>[a-z0-9]{64})\.log$
         Path              ${PATH}
         Parser            docker
         DB                /var/log/flb_kube.db
@@ -32,13 +33,117 @@ data:
         Refresh_Interval  10
 
   filter-kubernetes.conf: |
+    #=====================================================
+    # Stash a copy of the logs for other apps that
+    # need to operate on the raw log
+    #=====================================================
+    [FILTER]
+        Name    modify
+        Match   *
+        Copy    log copylg
+
+    #=====================================================
+    # Parse nginx logs
+    #=====================================================
+    [FILTER]
+        Name   parser
+        Match  kube.kube-system.nginx-ingress-controller.*
+        Key_Name copylg
+        Parser nginx
+        Preserve_Key On
+
+    #=====================================================
+    # Exclude nginx successes
+    #=====================================================
+    [FILTER]
+        Name    modify
+        Match   kube.kube-system.nginx-ingress-controller.*
+        Set     nginxexclude true
+        Condition Key_Value_Matches nginxcode 20*
+    [FILTER]
+        Name    modify
+        Match   kube.kube-system.nginx-ingress-controller.*
+        Set     nginxexclude true
+        Condition Key_Value_Matches nginxcode 10*
+    # Remove 304s from BombBombMobile2
+    [FILTER]
+        Name        modify
+        Match       kube.kube-system.nginx-ingress-controller.*
+        Set         nginxexclude true
+        Condition   Key_value_equals    nginxcode   304
+        Condition   Key_value_matches   nginxagent  BombBombMobile2.*
+    # Exclude socket.io 400s
+    [FILTER]
+        Name        modify
+        Match       kube.kube-system.nginx-ingress-controller.*
+        Set         nginxexclude true
+        Condition   Key_value_equals    nginxcode   400
+        Condition   Key_value_matches   nginxpath .*socket\.io.*
+    # Exclude warnings for "a client request body is buffered"
+    [FILTER]
+        Name        modify
+        Match       kube.kube-system.nginx-ingress-controller.*
+        Set         nginxexclude true
+        Condition   Key_value_matches   copylg .*a.*client.*request.*body.*is.*buffered.*scribe2.*
+    # LOCAL keep nginx for local testing
+    [FILTER]
+        Name    grep
+        Match   kube.kube-system.nginx-ingress-controller.*
+        Exclude nginxexclude true
+    [FILTER]
+        Name    modify
+        Match   kube.kube-system.nginx-ingress-controller.*
+        Rename nginxremote  nginx.remote
+        Rename nginxhost    nginx.host
+        Rename nginxuser    nginx.user
+        Rename nginxts      nginx.ts
+        Rename nginxmethod  nginx.method
+        Rename nginxpath    nginx.path
+        Rename nginxcode    nginx.code
+        Rename nginxsize    nginx.size
+        Rename nginxreferer nginx.referer
+        Rename nginxagent   nginx.agent
+        Condition Key_exists nginxcode
+
+    #=====================================================
+    # Exclude kube2iam successes
+    #=====================================================
+    [FILTER]
+        Name    grep
+        Match   kube.kube-system.kube2iam.*
+        Exclude log ^.*(latest\/meta-data\/iam\/security-credentials).*(res\.status=200).*$
+    [FILTER]
+        Name    grep
+        Match   kube.kube-system.kube2iam.*
+        Exclude log ^.*(PUT req\.path=\/latest\/api\/token).*(res\.status=403).*$
+
+    #=====================================================
+    # Decorate logs
+    #=====================================================
     [FILTER]
         Name                kubernetes
         Match               kube.*
+        Kube_Tag_Prefix     kube.
+        Regex_Parser        k8s-custom-tag
         Kube_URL            https://kubernetes.default.svc.cluster.local:443
-        Merge_JSON_Log      Off
+        Merge_Log           On
+        Merge_Log_Key       structured_logs
         K8S-Logging.Exclude On
         K8S-Logging.Parser  On
+
+    #=====================================================
+    # Cluster property
+    #=====================================================
+    [FILTER]
+        Name    modify
+        Match   *
+        Set     cluster lh-prod
+        # LOCAL change for dev/local
+        # Set     cluster lh-local
+    
+    #=====================================================
+    # Lift the annotations and labels up
+    #=====================================================
     [FILTER]
         Name         nest
         Match        *
@@ -51,23 +156,64 @@ data:
         Nested_under labels
         Prefix_with  labels.
     [FILTER]
-        Name    grep
-        Match   *
-        Exclude labels.app nginx-ingress
-    [FILTER]
         Name        modify
         Match       *
         Copy        labels.app app
-    [FILTER]
-        Name    modify
-        Match   *
-        Set     cluster lh-prod
     [FILTER]
         Name          nest
         Match         *
         Operation     lift
         Nested_under  annotations
         Prefix_with   annotations.
+    # Exclude any unnecessary/verbose apps
+    [FILTER]
+        Name grep
+        Match *
+        Exclude app newrelic-logs
+        # Exclude labels.component kube-addon-manager
+
+    #=====================================================
+    # Lumberjack
+    # LOCAL update structured log structure
+    #=====================================================
+    [FILTER]
+        Name         nest
+        Match        kube.default.lumberjack.*
+        Operation    lift
+        Nested_under structured_logs
+        Prefix_with  structured_logs.
+    [FILTER]
+        Name         nest
+        Match        kube.default.lumberjack.*
+        Operation    lift
+        Nested_under structured_logs.metadata
+        Prefix_with  structured_logs.metadata.
+    # LOCAL use with local for echoserver test
+    # [FILTER]
+    #     Name         nest
+    #     Match        kube.default.lumberjack.*
+    #     Operation    lift
+    #     Nested_under structured_logs.metadata.body
+    #     Prefix_with  structured_logs.metadata.body.
+    [FILTER]
+        Name        modify
+        Match       kube.default.lumberjack.*
+        Set         sourcetype lumberjack
+    [FILTER]
+        Name        modify
+        Match       kube.default.lumberjack.*
+        Copy        structured_logs.metadata.environment environment
+        Copy        structured_logs.metadata.xsrc xsrc
+        Hard_copy   structured_logs.metadata.xsrc app
+
+    #=====================================================
+    # Clean up
+    #=====================================================
+    [FILTER]
+        Name            modify
+        Match           *
+        Remove_regex    copylg.*
+        Remove_regex    structured_logs.*
     [FILTER]
         Name        record_modifier
         Match       *
@@ -109,4 +255,15 @@ data:
         Time_Keep   On
         # Command      |  Decoder | Field | Optional Action
         # =============|==================|=================
-        Decode_Field_As   escaped    log
+        # Decode_Field_As   escaped  log
+
+    [PARSER]
+        Name   nginx
+        Format regex
+        Regex ^(?<nginxremote>[^ ]*) (?<nginxhost>[^ ]*) (?<nginxuser>[^ ]*) \[(?<nginxts>[^\]]*)\] "(?<nginxmethod>\S+)(?: +(?<nginxpath>[^\"]*?)(?: +\S*)?)?" (?<nginxcode>[^ ]*) (?<nginxsize>[^ ]*)(?: "(?<nginxreferer>[^\"]*)" "(?<nginxagent>[^\"]*)")
+        Decode_Field escaped
+
+    [PARSER]
+        Name    k8s-custom-tag
+        Format  regex
+        Regex   ^(?<namespace_name>[^_]+)\.(?<container_name>.+)\.(?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)\.(?<docker_id>[a-z0-9]{64})-$
