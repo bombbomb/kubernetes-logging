@@ -58,38 +58,12 @@ data:
     [FILTER]
         Name    modify
         Match   kube.kube-system.nginx-ingress-controller.*
-        Set     nginxexclude true
+        Set     isnginxsuccess true
         Condition Key_Value_Matches nginxcode 20*
-    [FILTER]
-        Name    modify
-        Match   kube.kube-system.nginx-ingress-controller.*
-        Set     nginxexclude true
-        Condition Key_Value_Matches nginxcode 10*
-    # Remove 304s from BombBombMobile2
-    [FILTER]
-        Name        modify
-        Match       kube.kube-system.nginx-ingress-controller.*
-        Set         nginxexclude true
-        Condition   Key_value_equals    nginxcode   304
-        Condition   Key_value_matches   nginxagent  BombBombMobile2.*
-    # Exclude socket.io 400s
-    [FILTER]
-        Name        modify
-        Match       kube.kube-system.nginx-ingress-controller.*
-        Set         nginxexclude true
-        Condition   Key_value_equals    nginxcode   400
-        Condition   Key_value_matches   nginxpath .*socket.*io.*
-    # Exclude warnings for "a client request body is buffered"
-    [FILTER]
-        Name        modify
-        Match       kube.kube-system.nginx-ingress-controller.*
-        Set         nginxexclude true
-        Condition   Key_value_matches   copylg .*a.*client.*request.*body.*is.*buffered.*scribe.*
-    # LOCAL keep nginx for local testing 
     [FILTER]
         Name    grep
         Match   kube.kube-system.nginx-ingress-controller.*
-        Exclude nginxexclude true
+        Exclude isnginxsuccess true
     [FILTER]
         Name    modify
         Match   kube.kube-system.nginx-ingress-controller.*
@@ -112,10 +86,6 @@ data:
         Name    grep
         Match   kube.kube-system.kube2iam.*
         Exclude log ^.*(latest\/meta-data\/iam\/security-credentials).*(res\.status=200).*$
-    [FILTER]
-        Name    grep
-        Match   kube.kube-system.kube2iam.*
-        Exclude log ^.*(PUT req\.path=\/latest\/api\/token).*(res\.status=403).*$
 
     #=====================================================
     # Decorate logs
@@ -138,8 +108,6 @@ data:
         Name    modify
         Match   *
         Set     cluster lh-dev
-        # LOCAL change for dev/local
-        # Set     cluster lh-local
     
     #=====================================================
     # Lift the annotations and labels up
@@ -165,7 +133,7 @@ data:
         Operation     lift
         Nested_under  annotations
         Prefix_with   annotations.
-    # Exclude any unnecessary/verbose apps
+    # TODO exclude any unnecessary/verbose apps
     [FILTER]
         Name grep
         Match *
@@ -174,7 +142,7 @@ data:
 
     #=====================================================
     # Lumberjack
-    # LOCAL update structured log structure
+    # TODO update structured log structure
     #=====================================================
     [FILTER]
         Name         nest
@@ -188,13 +156,6 @@ data:
         Operation    lift
         Nested_under structured_logs.metadata
         Prefix_with  structured_logs.metadata.
-    # LOCAL use with local for echoserver test
-    # [FILTER]
-    #     Name         nest
-    #     Match        kube.default.lumberjack.*
-    #     Operation    lift
-    #     Nested_under structured_logs.metadata.body
-    #     Prefix_with  structured_logs.metadata.body.
     [FILTER]
         Name        modify
         Match       kube.default.lumberjack.*
@@ -202,9 +163,9 @@ data:
     [FILTER]
         Name        modify
         Match       kube.default.lumberjack.*
-        Copy        structured_logs.metadata.environment environment
-        Copy        structured_logs.metadata.xsrc xsrc
-        Hard_copy   structured_logs.metadata.xsrc app
+        Copy        structured_logs.metadata.body.environment environment
+        Copy        structured_logs.metadata.body.xsrc xsrc
+        Hard_copy   structured_logs.metadata.body.xsrc app
 
     #=====================================================
     # Clean up
@@ -255,14 +216,15 @@ data:
         Time_Keep   On
         # Command      |  Decoder | Field | Optional Action
         # =============|==================|=================
-        # Decode_Field_As   escaped  log
+        Decode_Field_As   json    log       try_next
+        Decode_Field_As   escaped  log
 
     [PARSER]
         Name   nginx
         Format regex
         Regex ^(?<nginxremote>[^ ]*) (?<nginxhost>[^ ]*) (?<nginxuser>[^ ]*) \[(?<nginxts>[^\]]*)\] "(?<nginxmethod>\S+)(?: +(?<nginxpath>[^\"]*?)(?: +\S*)?)?" (?<nginxcode>[^ ]*) (?<nginxsize>[^ ]*)(?: "(?<nginxreferer>[^\"]*)" "(?<nginxagent>[^\"]*)")
-        Decode_Field escaped
-        # Test this regex out later ^(?<message>(?<remote>[^ ]*) - (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*) "(?<referer>[^\"]*)" "(?<agent>[^\"]*)" (?<request_length>[^ ]*) (?<request_time>[^ ]*) \[(?<proxy_upstream_name>[^ ]*)\] \[(?<proxy_alternative_upstream_name>[^ ]*)\] (?<upstream_addr>[^ ]*) (?<upstream_response_length>[^ ]*) (?<upstream_response_time>[^ ]*) (?<upstream_status>[^ ]*) (?<req_id>[^ ]*).*)$
+        # Decode_Field escaped
+
     [PARSER]
         Name    k8s-custom-tag
         Format  regex
