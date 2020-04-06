@@ -156,10 +156,6 @@ data:
         Nested_under labels
         Prefix_with  labels.
     [FILTER]
-        Name        modify
-        Match       *
-        Copy        labels.app app
-    [FILTER]
         Name          nest
         Match         *
         Operation     lift
@@ -172,6 +168,36 @@ data:
         Exclude app newrelic-logs
         # Exclude labels.component kube-addon-manager
 
+    #=====================================================
+    # Update App and Branch
+    #=====================================================
+    [FILTER]
+        Name        modify
+        Match       *
+        Set         hasbranch true
+        Condition   Key_exists labels.branch
+        Condition   Key_exists labels.repo
+    [FILTER]
+        Name        modify
+        Match       *
+        Set         hasbranch false
+        Condition   Key_does_not_exist labels.branch
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy        labels.app app
+        Condition   Key_value_equals hasbranch false
+    [FILTER]
+        Name        modify
+        Match       *
+        Copy        labels.repo app
+        Copy        labels.branch environment
+        Condition   Key_value_equals hasbranch true
+    [FILTER]
+        Name        modify
+        Match       *
+        Remove      hasbranch
+    
     #=====================================================
     # Lumberjack
     # LOCAL update structured log structure
@@ -202,7 +228,7 @@ data:
     [FILTER]
         Name        modify
         Match       kube.default.lumberjack.*
-        Copy        structured_logs.metadata.environment environment
+        Hard_copy   structured_logs.metadata.environment environment
         Copy        structured_logs.metadata.xsrc xsrc
         Hard_copy   structured_logs.metadata.xsrc app
 
